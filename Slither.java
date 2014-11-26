@@ -1,8 +1,6 @@
 import java.util.*;
 import java.io.*;
 
-//new comment!
-
 public class Slither {
 	public static void main (String [] args) throws IOException {
 		Scanner sc = new Scanner(System.in);
