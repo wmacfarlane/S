@@ -10,11 +10,12 @@ public class Slither {
 		String[] line = br.readLine().split(" ");
 		int r = Integer.parseInt(line[0]);
 		int c = Integer.parseInt(line[1]);
-		Board board = new Board(r, c);
+		Board.setDimensions(r, c);
+		Board board = new Board();
 		for (int i = 0; i < r; i++) {
 			line = br.readLine().split(" ");
 			for (int j = 0; j < c; j++) {
-				board.lineReqs[i][j] = new LineReq(Integer.parseInt(line[j]));
+				Board.lineReqs[i][j] = new LineReq(Integer.parseInt(line[j]));
 			}
 		}
 		br.close();
@@ -29,10 +30,10 @@ public class Slither {
 				System.out.println("Congratulations! You solved it!");
 				break;
 			}
-			int r = sc.nextInt() - 1;
+			int r = sc.nextInt() - 1; // 0-indexing
 			int c = sc.nextInt() - 1;
 			Side side = Side.translate(sc.next().charAt(0));
-			board.mark(r, c, side);
+			board.state.markWall(Wall.makeWall(r, c, side));
 		}
 	}
 	static String instructions() {
@@ -84,11 +85,8 @@ class LineReq {
 }
 class BoardLogic {
 	Board board;
-	int r, c;
 	BoardLogic(Board board) {
 		this.board = board;
-		this.r = board.r;
-		this.c = board.c;
 	}
 	/*
 		There are two requirements that a solved puzzle must satisfy.
@@ -105,28 +103,30 @@ class BoardLogic {
 		return rightNumberOfCorners() && metLineRequirements() && justOneLoop();
 	}
 	private boolean rightNumberOfCorners() {
-		int[][] corners = new int[r+1][c+1];
+		int[][] corners = new int[Board.r+1][Board.c+1];
 		// The value at each cell corresponds to the number of times the top-left
 		// corner of that cell layed at the end of a 1-unit line segment.
-		for (int i = 0; i <= r; i++) {
-			for (int j = 0; j < c; j++) {
-				if (board.isMarked(i, j, Side.TOP)) {
+		for (int i = 0; i <= Board.r; i++) {
+			for (int j = 0; j < Board.c; j++) {
+				Wall w = Wall.makeWall(i, j, Side.TOP);
+				if (board.state.wallMarked(w)) {
 					corners[i][j]++;
 					corners[i][j+1]++;
 				}
 			}
 		}
-		for (int i = 0; i < r; i++) {
-			for (int j = 0; j <= c; j++) {
-				if (board.isMarked(i, j, Side.LEFT)) {
+		for (int i = 0; i < Board.r; i++) {
+			for (int j = 0; j <= Board.c; j++) {
+				Wall w = Wall.makeWall(i, j, Side.LEFT);
+				if (board.state.wallMarked(w)) {
 					corners[i][j]++;
 					corners[i+1][j]++;
 				}
 			}
 		}
 		// Now let's count our corners.
-		for (int i = 0; i <= r; i++) {
-			for (int j = 0; j <= c; j++) {
+		for (int i = 0; i <= Board.r; i++) {
+			for (int j = 0; j <= Board.c; j++) {
 				if (corners[i][j] != 0 && corners[i][j] != 2)
 					return false;
 			}
@@ -135,14 +135,15 @@ class BoardLogic {
 	}
 	private boolean metLineRequirements() {
 		// Now let's make sure we've met the line requirements.
-		for (int i = 0; i < r; i++) {
-			for (int j = 0; j < c; j++) {
+		for (int i = 0; i < Board.r; i++) {
+			for (int j = 0; j < Board.c; j++) {
 				if (!board.lineReqs[i][j].hasValue())
 					continue;
 				int target = board.lineReqs[i][j].getValue();
 				int count = 0;
 				for (Side side : Side.values()) {
-					if (board.isMarked(i, j, side))
+					Wall w = Wall.makeWall(i, j, side);
+					if (board.state.wallMarked(w))
 						count++;
 				}
 				if (target != count)
@@ -152,40 +153,42 @@ class BoardLogic {
 		return true;
 	}
 	private boolean justOneLoop() {
-		Trio t = null;
+		Wall start = null;
 		SEARCH:
-		for (int i = 0; i <= board.r; i++) {
-			for (int j = 0; j <= board.c; j++) {
+		for (int i = 0; i <= Board.r; i++) {
+			for (int j = 0; j <= Board.c; j++) {
 				for (Side s : Side.RELEVANT_SIDES) {
-					if (board.isMarked(i, j, s)) {
-						t = new Trio(i, j, s);
+					Wall w = Wall.makeWall(i, j, s);
+					if (board.state.wallMarked(w)) {
+						start = w;
 						break SEARCH;
 					}
 				}
 			}
 		}
-		if (t == null) {
+		if (start == null) {
 			return false;
 		}
-		HashSet<Trio> hs = new HashSet<Trio>();
-		LinkedList<Trio> q = new LinkedList<Trio>();
-		q.offer(t);
-		hs.add(t);
+		HashSet<Wall> hs = new HashSet<Wall>();
+		LinkedList<Wall> q = new LinkedList<Wall>();
+		q.offer(start);
+		hs.add(start);
 		while(!q.isEmpty()) {
-			Trio u = q.poll();
-			Iterator<Trio> it = board.getTouchingWalls(u).iterator();
+			Wall u = q.poll();
+			Iterator<Wall> it = getTouchingWalls(u).iterator();
 			while (it.hasNext()) {
-				Trio v = it.next();
+				Wall v = it.next();
 				if (!hs.contains(v)) {
 					hs.add(v);
 					q.add(v);
 				}
 			}
 		}
-		for (int i = 0; i <= board.r; i++) {
-			for (int j = 0; j <= board.c; j++) {
+		for (int i = 0; i <= Board.r; i++) {
+			for (int j = 0; j <= Board.c; j++) {
 				for (Side s : Side.RELEVANT_SIDES) {
-					if (board.isMarked(i, j, s) && !hs.contains(new Trio(i, j, s))) {
+					Wall w = Wall.makeWall(i, j, s);
+					if (board.state.wallMarked(w) && !hs.contains(w)) {
 						return false;
 					}
 				}
@@ -193,135 +196,116 @@ class BoardLogic {
 		}
 		return true; // no line was found that wasn't touching the main loop
 	}
+	public List<Wall> getTouchingWalls(Wall base) {
+		List<Wall> touchingWalls = new ArrayList<Wall>();
+		Wall w;
+		if (base.vertical) { // LEFT
+			for (int r = base.r - 1; r <= base.r+1; r++) {
+				w = Wall.makeWall(r, base.c, Side.LEFT);
+				if (board.state.wallMarked(w)) {
+					touchingWalls.add(w);
+				}
+			}
+			for (int r = base.r; r <= base.r + 1; r++) {
+				for (int c = base.c - 1; c <= base.c; c++) {
+					w = Wall.makeWall(r, c, Side.TOP);
+					if (board.state.wallMarked(w)) {
+						touchingWalls.add(w);
+					}
+				}
+			}
+		} else { // TOP
+			for (int c = base.c - 1; c <= base.c + 1; c++) {
+				w = Wall.makeWall(base.r, c, Side.TOP);
+				if (board.state.wallMarked(w)) {
+					touchingWalls.add(w);
+				}
+			}
+			for (int r = base.r - 1; r <= base.r; r++) {
+				for (int c = base.c; c <= base.c + 1; c++) {
+					w = Wall.makeWall(r, c, Side.LEFT);
+					if (board.state.wallMarked(w)) {
+						touchingWalls.add(w);
+					}
+				}
+			}
+		}
+		return touchingWalls;
+	}
 }
-class Trio {
-	int i;
-	int j;
-	Side side;
+class Wall {
+	int r, c;
+	boolean vertical;
+	Wall (int row, int col, boolean v) {
+		r = row;
+		c = col;
+		vertical = v;
+	}
+	public boolean isValid() {
+		int maxR = vertical ? Board.r - 1 : Board.r;
+		int maxC = vertical ? Board.c : Board.c - 1;
+		return r >= 0 && r <= maxR && c >= 0 && c <= maxC;
+	}
 	@Override
 	public int hashCode() {
-		return i + (j * 26) + (side.ordinal() * 806); //i <= 25, j <= 30
-	}
-	public Trio (int a, int b, Side c) {
-		i = a;
-		j = b;
-		side = c;
-	}
-	public String toString() {
-		return "i: " + i + "j: " + j + "side: " + side;
+		return r + (c * 31) + (vertical ? 0 : 955); //r <= 25, c <= 30
 	}
 	@Override
 	public boolean equals(Object o) {
 		return hashCode() == o.hashCode();
 	}
+	public String toString() {
+		return "r: " + r + ", c: " + c + ", side: " + (vertical ? "left" : "top");
+	}
+	public static Wall makeWall(int r, int c, Side side) {
+		switch (side) {
+			case TOP:
+				return new Wall(r, c, false);
+			case RIGHT:
+				return new Wall(r, c+1, true);
+			case BOTTOM:
+				return new Wall(r+1, c, false);
+			case LEFT:
+				return new Wall(r, c, true);
+			default:
+				throw new IllegalArgumentException();
+		}
+	}
+}
+class State {
+	private int[] leftWalls; // navigate rows by [], cols by bit
+	private int[] topWalls;
+	Wall lastPlacedWall;
+	public State() {
+		leftWalls = new int[Board.r];
+		topWalls = new int[Board.r+1];
+		lastPlacedWall = null;
+	}
+	public boolean wallMarked(Wall wall) {
+		if (!wall.isValid())
+			return false;
+		int[] walls = wall.vertical ? leftWalls : topWalls;
+		return (walls[wall.r] & (1 << (Board.c - wall.c))) > 0; 
+	}
+	public void markWall(Wall wall) {
+		if (!wall.isValid())
+			return;
+		int[] walls = wall.vertical ? leftWalls : topWalls;
+		walls[wall.r] |= (1 << Board.c - wall.c);
+		lastPlacedWall = wall;
+	}
 }
 class Board {
-	int r, c;
-	private Wall[][] walls;
-	LineReq[][] lineReqs;
-	public Board (int r, int c) {
-		this.r = r;
-		this.c = c;
-		walls = new Wall[r][c];
+	static int r, c;
+	static LineReq[][] lineReqs;
+	State state;
+	public Board () {
+		state = new State();
+	}
+	public static void setDimensions(int row, int col) {
+		r = row;
+		c = col;
 		lineReqs = new LineReq[r][c];
-		for (int i = 0; i < r; i++)
-			for (int j = 0; j < c; j++)
-				walls[i][j] = new Wall();
-	}
-	public boolean isMarked(int i, int j, Side side) {
-		Trio equivWall = getEquivalentWall(i, j, side);
-		int equivI = equivWall.i;
-		int equivJ = equivWall.j;
-		Side correspondingSide = equivWall.side;
-		if (rowInBounds(i) && columnInBounds(j))
-			return walls[i][j].isMarked(side);
-		if (rowInBounds(equivI) && columnInBounds(equivJ)) // if they specify the left of the rightmost wall
-			return walls[equivI][equivJ].isMarked(correspondingSide);
-		return false;
-	}
-	public List<Trio> getTouchingWalls(Trio t) {
-		List<Trio> touchingWalls = new ArrayList<Trio>();
-		Trio base;
-		if (t.side == Side.BOTTOM || t.side == Side.RIGHT) {
-			base = getEquivalentWall(t.i, t.j, t.side);
-		} else {
-			base = t;
-		}
-		switch (base.side) {
-			case TOP:
-				for (int c = base.j - 1; c <= base.j + 1; c++) {
-					if (isMarked(base.i, c, Side.TOP)) {
-						touchingWalls.add(new Trio(base.i, c, Side.TOP));
-					}
-				}
-				for (int r = base.i - 1; r <= base.i; r++) {
-					for (int c = base.j; c <= base.j + 1; c++) {
-						if (isMarked(r, c, Side.LEFT)) {
-							touchingWalls.add(new Trio(r, c, Side.LEFT));
-						}
-					}
-				}
-			break;
-			case LEFT:
-				for (int r = base.i - 1; r <= base.i+1; r++) {
-					if (isMarked(r, base.j, Side.LEFT)) {
-						touchingWalls.add(new Trio(r, base.j, Side.LEFT));
-					}
-				}
-				for (int r = base.i; r <= base.i + 1; r++) {
-					for (int c = base.j - 1; c <= base.j; c++) {
-						if (isMarked(r, c, Side.TOP)) {
-							touchingWalls.add(new Trio(r, c, Side.TOP));
-						}
-					}
-				}
-			break;
-			default:
-				throw new RuntimeException("GetTouchingWalls issues");
-		}
-		return touchingWalls;
-	}
-	public Trio getEquivalentWall(int i, int j, Side side) {
-		int equivI, equivJ;
-		Side correspondingSide;
-		if (side == Side.TOP) {
-			equivI = i - 1;
-			equivJ = j;
-			correspondingSide = Side.BOTTOM;
-		} else if (side == Side.RIGHT) {
-			equivI = i;
-			equivJ = j + 1;
-			correspondingSide = Side.LEFT;
-		} else if (side == Side.BOTTOM) {
-			equivI = i + 1;
-			equivJ = j;
-			correspondingSide = Side.TOP;
-		} else { // left
-			equivI = i;
-			equivJ = j - 1;
-			correspondingSide = Side.RIGHT;
-		}
-		return new Trio(equivI, equivJ, correspondingSide);
-	}
-	// Invariant: mark(i, j, side) must be reflected on both sides of the wall
-	public void mark(int i, int j, Side side) {
-		Trio equivWall = getEquivalentWall(i, j, side);
-		int equivI = equivWall.i;
-		int equivJ = equivWall.j;
-		Side correspondingSide = equivWall.side;
-
-		if (rowInBounds(i) && columnInBounds(j)) {
-			walls[i][j].mark(side);
-		}
-		if (rowInBounds(equivI) && columnInBounds(equivJ)) {
-			walls[equivI][equivJ].mark(correspondingSide);
-		}
-	}
-	public boolean rowInBounds(int i) {
-		return (i >= 0) && (i < r);
-	}
-	public boolean columnInBounds(int j) {
-		return (j >= 0) && (j < c);
 	}
 	@Override
 	public String toString() {
@@ -344,7 +328,8 @@ class Board {
 		return sb.toString();
 	}
 	private void addContentsToString(StringBuilder sb, int row) {
-		if (isMarked(row, 0, Side.LEFT)) {
+		Wall w = Wall.makeWall(row, 0, Side.LEFT);
+		if (state.wallMarked(w)) {
 			sb.append("|");
 		} else {
 			sb.append(" ");
@@ -357,7 +342,8 @@ class Board {
 				sb.append(" ");
 			}
 			// wall marking
-			if (isMarked(row, j, Side.RIGHT)) {
+			w = Wall.makeWall(row, j, Side.RIGHT);
+			if (state.wallMarked(w)) {
 				sb.append("|");
 			} else {
 				sb.append(" ");
@@ -368,28 +354,15 @@ class Board {
 	}
 	private void addWallsToString(StringBuilder sb, int row, Side side) {
 		for (int j = 0; j < c; j++) {
+			Wall w = Wall.makeWall(row, j, side);
 			sb.append("+");
-			if (isMarked(row, j, side)) {
+			if (state.wallMarked(w)) {
 				sb.append("-");
 			} else {
 				sb.append(" ");
 			}
 		}
 		sb.append("+\n");
-	}
-	private class Wall {
-		int value; // represented by a 4-digit base 2 value
-		public Wall() {
-			value = 0;
-		}
-		public void mark (Side side) {
-			if (!isMarked(side)) {
-				value += (1 << side.ordinal());
-			}
-		}
-		public boolean isMarked (Side side) {
-			return (value & (1 << side.ordinal())) != 0;
-		}
 	}
 }
 enum Side {
